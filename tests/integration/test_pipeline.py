@@ -437,3 +437,36 @@ class TestWalkForwardGridValidation:
         with pytest.raises(ConfigurationError) as excinfo:
             WalkForwardValidator(config).validate_grid()
         assert "5.0" in str(excinfo.value)
+
+
+class TestStabilitySweepValidation:
+    """The same rule for the one-at-a-time sweep.
+
+    A dropped sweep point does not fail the run; it shrinks the neighbourhood
+    the verdict is computed over, which is a quieter and more misleading
+    outcome than an error.
+    """
+
+    def test_shipped_sweep_is_valid(self, base_config):
+        from atlas.validation.parameter_stability import ParameterStabilityAnalyzer
+
+        analyzer = ParameterStabilityAnalyzer(base_config)
+        analyzer.validate_sweep(base_config.validation.parameter_stability.parameters)
+
+    def test_impossible_value_is_rejected_up_front(self, base_config):
+        from atlas.exceptions import ConfigurationError
+        from atlas.validation.parameter_stability import ParameterStabilityAnalyzer
+
+        # fast_ma is 100, so slow_ma=100 can never construct.
+        sweep = {"trend.slow_ma": [100, 150, 200]}
+        with pytest.raises(ConfigurationError, match="cannot produce a valid configuration"):
+            ParameterStabilityAnalyzer(base_config).validate_sweep(sweep)
+
+    def test_error_names_the_offending_value(self, base_config):
+        from atlas.exceptions import ConfigurationError
+        from atlas.validation.parameter_stability import ParameterStabilityAnalyzer
+
+        sweep = {"portfolio.target_volatility": [0.10, 5.0]}
+        with pytest.raises(ConfigurationError) as excinfo:
+            ParameterStabilityAnalyzer(base_config).validate_sweep(sweep)
+        assert "5.0" in str(excinfo.value)

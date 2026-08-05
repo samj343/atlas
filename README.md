@@ -267,12 +267,17 @@ walk-forward evaluation, all eight benchmarks. Writes a full HTML research
 report.
 
 **On results in this repository:** the environment this project was built in has
-no outbound access to Yahoo Finance, so the committed artefacts come from the
-deterministic **synthetic** provider and are labelled as such everywhere — in the
-console, in the report banner, and in the stored manifest. They demonstrate that
-every component runs and that the risk controls behave as specified. **They carry
-no information about real market performance.** Run the command above with
-network access to reproduce it on real history.
+no outbound access to Yahoo Finance, so the reference run uses the deterministic
+**synthetic** provider and is labelled as such everywhere — in the console, in
+the report banner, and in the stored manifest. It demonstrates that every
+component runs and that the risk controls behave as specified. **It carries no
+information about real market performance.** Run the command above with network
+access to reproduce it on real history.
+
+`reports/` is generated rather than committed, so the run is transcribed into
+[docs/baseline_results.md](docs/baseline_results.md) — in-sample metrics, all
+eight benchmarks, walk-forward degradation, stress periods, the bootstrap and the
+parameter sweep, with the run ID and config hash that produced them.
 
 Atlas never fabricates a metric. If data cannot be retrieved, the experiment
 stops and prints setup instructions.
@@ -344,7 +349,7 @@ make coverage
 make check         # lint + type-check + test
 ```
 
-462 tests (459 fast, 3 marked slow). The ones that matter most:
+465 tests (462 fast, 3 marked slow). The ones that matter most:
 
 - `tests/unit/test_lookahead.py` — perturbs the future, asserts the past does not
   move; checks that walk-forward windows never overlap, that no fill lands on its

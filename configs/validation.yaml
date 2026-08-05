@@ -41,7 +41,10 @@ walk_forward:
 parameter_stability:
   # Parameters swept one at a time around the baseline configuration.
   parameters:
-    trend.slow_ma: [100, 125, 150, 175, 200, 225, 250]
+    # As in the walk-forward grid, slow_ma must stay above fast_ma (100). A
+    # value of 100 raises a validation error, and the sweep would then measure
+    # stability over one point fewer than it reports having asked for.
+    trend.slow_ma: [125, 150, 175, 200, 225, 250, 275]
     trend.momentum_lookback: [63, 126, 189, 252]
     mean_reversion.entry_threshold: [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5]
     mean_reversion.zscore_lookback: [10, 15, 20, 25, 30]

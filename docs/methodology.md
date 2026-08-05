@@ -329,6 +329,13 @@ The sweep is repeated gross of costs, so a strategy whose edge exists only befor
 trading costs is exposed rather than hidden. A broad plateau is evidence; a lone
 spike is a curve fit.
 
+Every swept value is checked up front by `validate_sweep`, the same way the
+walk-forward grid is checked. A value that can never construct — `trend.slow_ma`
+at or below `trend.fast_ma`, say — would otherwise be dropped mid-run with only a
+log line, and the verdict would then describe a narrower neighbourhood than the
+sweep claims to cover. Any point that still fails at runtime is listed in
+`StabilityResult.failures` and printed by the baseline script.
+
 ---
 
 ## 12. Stress testing and resampling — `validation/stress_tests.py`

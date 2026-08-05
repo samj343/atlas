@@ -263,6 +263,10 @@ def main() -> int:
         try:
             stability = ParameterStabilityAnalyzer(config).run(panel)
             print(stability.verdicts.round(4).to_string(index=False))
+            for failure in stability.failures:
+                # A dropped point means the verdict above covers fewer settings
+                # than the sweep asked for; that must not be silent.
+                print(f"  sweep point dropped: {failure}")
             if stability.fragile_parameters:
                 print(f"\n  FRAGILE: {', '.join(stability.fragile_parameters)}")
             else:

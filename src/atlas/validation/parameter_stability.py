@@ -32,7 +32,7 @@ from atlas.backtest.engine import BacktestEngine
 from atlas.config import AtlasConfig
 from atlas.data.features import FeatureEngineer, FeatureSet
 from atlas.data.loader import PricePanel
-from atlas.exceptions import AtlasError
+from atlas.exceptions import AtlasError, ConfigurationError
 from atlas.logging_utils import get_logger
 from atlas.validation.walk_forward import apply_overrides
 
@@ -87,6 +87,33 @@ class ParameterStabilityAnalyzer:
         self.config = config
         self.settings = config.validation.parameter_stability
 
+    def validate_sweep(self, grid: dict[str, list[Any]]) -> None:
+        """Check every swept value can produce a valid configuration.
+
+        A value that never constructs - ``trend.slow_ma`` at or below
+        ``trend.fast_ma``, say - would otherwise be dropped mid-run with only a
+        log warning, and the verdict would then be computed over fewer points
+        than the sweep claims to cover. A stability verdict measured on a
+        silently smaller neighbourhood is worse than no verdict at all.
+
+        Raises
+        ------
+        ConfigurationError
+            Listing every value that cannot be applied, and why.
+        """
+        invalid: list[str] = []
+        for path, values in grid.items():
+            for value in values:
+                try:
+                    apply_overrides(self.config, {path: value})
+                except (ValueError, TypeError) as exc:
+                    invalid.append(f"{path}={value}: {str(exc).splitlines()[0]}")
+        if invalid:
+            raise ConfigurationError(
+                "the parameter-stability sweep contains values that cannot produce a valid "
+                "configuration:\n  - " + "\n  - ".join(invalid)
+            )
+
     def run(
         self,
         panel: PricePanel,
@@ -113,6 +140,7 @@ class ParameterStabilityAnalyzer:
         grid = parameters if parameters is not None else self.settings.parameters
         if not grid:
             raise AtlasError("no parameters configured for the stability sweep")
+        self.validate_sweep(grid)
         gross_too = self.settings.include_gross if include_gross is None else include_gross
 
         rows: list[dict[str, Any]] = []
