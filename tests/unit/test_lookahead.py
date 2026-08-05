@@ -303,13 +303,68 @@ class TestExecutionTiming:
         )
 
     def test_next_open_uses_the_open_price(self, config, short_panel):
-        """Fills reference the next bar's open, not the signal bar's close."""
+        """Fills reference the next bar's open, not the signal bar's close.
+
+        The open is taken on the *adjusted* scale, because positions are marked
+        on the adjusted close - see TestPriceScaleInExecution.
+        """
         config.backtest.execution_timing = ExecutionTiming.NEXT_OPEN
         result = BacktestEngine(config).run(short_panel)
         assert not result.fills.empty
 
         row = result.fills.iloc[0]
         fill_date = pd.Timestamp(row["timestamp"]).normalize()
-        expected_open = short_panel.open.loc[fill_date, row["symbol"]]
-        # The reference price is the raw bar price before costs are applied.
+        expected_open = short_panel.adjusted("open").loc[fill_date, row["symbol"]]
+        # The reference price is the bar price before costs are applied.
         assert row["reference_price"] == pytest.approx(expected_open, rel=1e-6)
+        # And it is not the signal bar's close.
+        signal_close = short_panel.adj_close.loc[: fill_date, row["symbol"]].iloc[-2]
+        assert row["reference_price"] != pytest.approx(signal_close, rel=1e-12)
+
+
+class TestPriceScaleInExecution:
+    """A regression test for phantom P&L from mixed price scales.
+
+    The engine once filled orders at the *raw* open while marking positions at
+    the *adjusted* close. Every buy booked the accumulated dividend adjustment
+    as an instant gain and every sell gave it straight back, injecting large
+    artificial jumps into the return series.
+    """
+
+    def test_fills_use_the_adjusted_scale(self, config, panel):
+        from atlas.config import ExecutionTiming
+
+        config.backtest.execution_timing = ExecutionTiming.NEXT_OPEN
+        config.backtest.price_field = "adj_close"
+        result = BacktestEngine(config).run(panel)
+
+        assert not result.fills.empty
+        adjusted_open = panel.adjusted("open")
+        for _, row in result.fills.head(50).iterrows():
+            stamp = pd.Timestamp(row["timestamp"]).normalize()
+            expected = adjusted_open.loc[stamp, row["symbol"]]
+            assert row["reference_price"] == pytest.approx(expected, rel=1e-6), (
+                "a fill priced off the raw open while positions are marked on the "
+                "adjusted close"
+            )
+
+    def test_no_phantom_jumps_in_the_return_series(self, config, panel):
+        """Daily portfolio returns must be bounded by the exposure they carry."""
+        result = BacktestEngine(config).run(panel)
+        gross = result.snapshots["gross_exposure"]
+        worst_asset_move = panel.returns().abs().max().max()
+        # A portfolio cannot move more than its gross exposure times the worst
+        # single-asset move (plus a margin for costs and intraday execution).
+        bound = float(gross.max() * worst_asset_move * 1.5) + 0.01
+        assert result.returns.abs().max() < bound, (
+            f"a daily return of {result.returns.abs().max():.2%} exceeds what "
+            f"{gross.max():.2f}x exposure can produce - a price-scale mismatch injects "
+            "exactly this kind of jump"
+        )
+
+    def test_kurtosis_is_not_pathological(self, config, panel):
+        result = BacktestEngine(config).run(panel)
+        assert result.returns.kurtosis() < 25, (
+            "extreme kurtosis in portfolio returns usually means artificial jumps, "
+            "not fat tails in the underlying data"
+        )

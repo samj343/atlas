@@ -344,7 +344,7 @@ make coverage
 make check         # lint + type-check + test
 ```
 
-366 tests. The ones that matter most:
+459 tests (456 fast, 3 marked slow). The ones that matter most:
 
 - `tests/unit/test_lookahead.py` — perturbs the future, asserts the past does not
   move; checks that walk-forward windows never overlap and that no fill lands on

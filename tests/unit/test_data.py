@@ -332,3 +332,48 @@ class TestValidator:
         text = report.render()
         assert "Atlas data validation report" in text
         assert "symbols_checked" in text
+
+
+class TestPriceScaleConsistency:
+    """Execution and valuation prices must share one scale.
+
+    Vendors report OHLC on the raw price scale and supply a separate adjusted
+    close. Filling at a raw open while marking positions at an adjusted close
+    books the accumulated dividend adjustment as instant profit on every buy and
+    an equal loss on every sell - which injects enormous artificial noise.
+    """
+
+    def test_adjustment_factor_is_positive_and_finite(self, short_panel):
+        factor = short_panel.adjustment_factor()
+        assert (factor > 0).to_numpy().all()
+        assert np.isfinite(factor.to_numpy()).all()
+
+    def test_adjusted_open_matches_the_adjusted_close_scale(self, panel):
+        """An adjusted open must sit within a normal daily range of its close."""
+        adjusted_open = panel.adjusted("open")
+        gap = (adjusted_open / panel.adj_close - 1.0).stack(future_stack=True).dropna()
+        assert gap.abs().max() < 0.25, (
+            "the adjusted open is far from the adjusted close, which means the two are "
+            "on different price scales"
+        )
+
+    def test_raw_open_is_on_a_different_scale(self, panel):
+        """Documents the trap: the raw open is NOT comparable to adj_close."""
+        factor = panel.adjustment_factor()
+        assert factor.to_numpy().max() > 1.01, "fixture has no dividend adjustment to test"
+        raw_gap = (panel.open / panel.adj_close - 1.0).stack(future_stack=True).dropna()
+        adjusted_gap = (
+            (panel.adjusted("open") / panel.adj_close - 1.0).stack(future_stack=True).dropna()
+        )
+        assert adjusted_gap.abs().mean() < raw_gap.abs().mean()
+
+    def test_adj_close_is_returned_unchanged(self, short_panel):
+        assert np.allclose(
+            short_panel.adjusted("adj_close").to_numpy(),
+            short_panel.adj_close.to_numpy(),
+            equal_nan=True,
+        )
+
+    def test_volume_cannot_be_adjusted(self, short_panel):
+        with pytest.raises(DataError, match="not a price"):
+            short_panel.adjusted("volume")

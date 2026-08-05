@@ -49,6 +49,23 @@ reconciled.
 
 It is deterministic: identical inputs give identical fills.
 
+## Price scales
+
+Vendors report OHLC on the **raw** price scale and supply a separate **adjusted**
+close. Mixing them is a real source of phantom profit: filling at a raw open
+while marking positions at an adjusted close books the entire accumulated
+dividend adjustment as an instantaneous gain on every buy, and gives it back on
+every sell.
+
+Atlas therefore converts the execution price onto whichever basis the run values
+positions on. With `price_field: adj_close` (the default) orders fill at
+`open x (adj_close / close)`; with `price_field: close` they fill at the raw open
+and dividends are credited separately as cash.
+
+`tests/unit/test_lookahead.py::TestPriceScaleInExecution` guards this by
+asserting that no daily portfolio return can exceed what its gross exposure and
+the worst single-asset move allow.
+
 ## Cash accounting
 
 `equity = cash + Σ(quantity × price)` — always, checked by an integration test

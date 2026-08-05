@@ -380,8 +380,17 @@ class BacktestEngine:
         portfolio = Portfolio(bt.initial_capital, allow_negative_cash=True)
         self.risk_manager.reset()
 
-        open_prices = panel.open
-        close_prices = panel.close if bt.price_field == "close" else panel.adj_close
+        # Execution and valuation prices must share one scale. Vendors report
+        # OHLC raw and the close adjusted, so filling at a raw open while marking
+        # at an adjusted close would book the whole accumulated dividend
+        # adjustment as instant profit. `panel.adjusted` converts the open onto
+        # whichever basis the run is valuing positions on.
+        if bt.price_field == "close":
+            open_prices = panel.open
+            close_prices = panel.close
+        else:
+            open_prices = panel.adjusted("open")
+            close_prices = panel.adj_close
         returns = panel.returns("adj_close")
         adv = panel.volume.rolling(cfg.costs.adv_lookback, min_periods=1).mean()
         daily_vol = returns.rolling(21, min_periods=5).std(ddof=1)

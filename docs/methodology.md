@@ -27,6 +27,20 @@ Three mechanisms enforce it:
 Warm-up history *before* a backtest's start date is used, and that is not
 look-ahead — it only ever looks backwards.
 
+### Price scales
+
+A related discipline, and one that is easier to get wrong: execution and
+valuation prices must share a single scale. Vendors report OHLC on the **raw**
+scale and supply a separate **adjusted** close, so a run that values positions
+at the adjusted close converts its execution open through the same day's
+`adj_close / close` factor.
+
+Skipping that conversion books the whole accumulated dividend adjustment as
+instant profit on every purchase, and gives it back on every sale. It is not a
+small effect — over twenty years at a 1.5% yield the factor exceeds 1.3, and a
+30% discontinuity injected on each trade is enough to make the return series
+look wildly profitable and wildly fat-tailed at the same time.
+
 ---
 
 ## 2. Features

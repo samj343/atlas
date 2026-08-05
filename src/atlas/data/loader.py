@@ -162,6 +162,35 @@ class PricePanel:
         """Most recent date with a valid adjusted close, per symbol."""
         return self.adj_close.apply(lambda col: col.last_valid_index())
 
+    def adjustment_factor(self) -> pd.DataFrame:
+        """Per-day ratio ``adj_close / close``.
+
+        Vendors report OHLC on the *raw* price scale and supply a separate
+        adjusted close. The factor for a day applies to all four of that day's
+        prices, so it is what converts an open, high or low onto the same scale
+        as the adjusted close.
+        """
+        factor = (self.adj_close / self.close).replace([np.inf, -np.inf], np.nan)
+        return factor.ffill().bfill()
+
+    def adjusted(self, field_name: str) -> pd.DataFrame:
+        """Return a price field rescaled onto the adjusted (total-return) basis.
+
+        Mixing scales is a real source of phantom profit: buying at a *raw* open
+        and marking the position at an *adjusted* close books the entire
+        accumulated dividend adjustment as an instantaneous gain. Any component
+        that executes against ``open``/``high``/``low`` while valuing positions
+        at ``adj_close`` must convert through here first.
+
+        ``adj_close`` is returned unchanged; ``volume`` is not a price and is
+        rejected.
+        """
+        if field_name == "adj_close":
+            return self.adj_close
+        if field_name == "volume":
+            raise DataError("volume is not a price and cannot be adjusted")
+        return self.field(field_name) * self.adjustment_factor()
+
     def implied_dividends(self) -> pd.DataFrame:
         """Estimate per-share cash distributions from the adjustment factor.
 
