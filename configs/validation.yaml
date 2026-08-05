@@ -1,0 +1,102 @@
+# Walk-forward validation, parameter stability, stress testing and bootstrap.
+
+walk_forward:
+  train_years: 5
+  validation_years: 1
+  test_years: 1
+  step_years: 1
+  # Purge this many trading days between adjacent windows so that a feature with
+  # a long lookback cannot straddle the boundary.
+  embargo_days: 21
+  min_train_observations: 500
+
+  # Small, economically motivated grid. Brute-force mining is explicitly avoided:
+  # the config model rejects any grid expanding past 500 combinations, and this
+  # default is deliberately 12. Each combination costs one backtest over
+  # train+validation per window, so cost is
+  #   n_combinations x n_windows x (train_years + validation_years).
+  # Widen it only with a reason, and expect the runtime to grow proportionally.
+  parameter_grid:
+    # Every value must produce a valid configuration: trend.slow_ma has to stay
+    # above trend.fast_ma (100), so 100 is not a legal candidate here.
+    # WalkForwardValidator validates the whole grid before running anything.
+    trend.slow_ma: [150, 200]
+    mean_reversion.entry_threshold: [1.0, 1.5]
+    portfolio.target_volatility: [0.08, 0.10, 0.12]
+
+  # Multi-objective selection score computed on the VALIDATION slice:
+  #   score = w_sharpe * sharpe
+  #         - w_drawdown * max_drawdown
+  #         - w_turnover * annual_turnover
+  #         - w_stability * |train_sharpe - validation_sharpe|
+  objective:
+    w_sharpe: 1.0
+    w_drawdown: 1.0
+    w_turnover: 0.10
+    w_stability: 0.50
+    # Candidates breaching these are discarded before scoring.
+    max_acceptable_drawdown: 0.35
+    max_acceptable_annual_turnover: 25.0
+
+parameter_stability:
+  # Parameters swept one at a time around the baseline configuration.
+  parameters:
+    trend.slow_ma: [100, 125, 150, 175, 200, 225, 250]
+    trend.momentum_lookback: [63, 126, 189, 252]
+    mean_reversion.entry_threshold: [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5]
+    mean_reversion.zscore_lookback: [10, 15, 20, 25, 30]
+    cross_sectional_momentum.lookback: [63, 126, 189, 252]
+    cross_sectional_momentum.top_k: [2, 3, 4, 5, 6]
+    portfolio.target_volatility: [0.06, 0.08, 0.10, 0.12, 0.15]
+  # A parameter is flagged fragile if the best setting beats the median setting
+  # by more than this many Sharpe units, or if the coefficient of variation of
+  # Sharpe across the sweep exceeds cv_threshold.
+  fragility_sharpe_gap: 0.50
+  cv_threshold: 0.60
+  # Also run the sweep gross of costs to measure cost sensitivity.
+  include_gross: true
+
+stress_tests:
+  periods:
+    - name: "GFC 2008"
+      start: "2007-10-09"
+      end: "2009-03-09"
+    - name: "2010 Flash Crash"
+      start: "2010-04-23"
+      end: "2010-07-02"
+    - name: "2011 Debt Ceiling"
+      start: "2011-07-01"
+      end: "2011-10-03"
+    - name: "2015-2016 Correction"
+      start: "2015-08-01"
+      end: "2016-02-11"
+    - name: "Q4 2018 Selloff"
+      start: "2018-10-01"
+      end: "2018-12-24"
+    - name: "COVID Crash 2020"
+      start: "2020-02-19"
+      end: "2020-03-23"
+    - name: "2022 Rate Shock"
+      start: "2022-01-03"
+      end: "2022-10-12"
+    - name: "2023 Regional Banks"
+      start: "2023-03-01"
+      end: "2023-05-04"
+
+monte_carlo:
+  enabled: true
+  method: block_bootstrap          # block_bootstrap | stationary_bootstrap
+  n_simulations: 1000
+  block_size_days: 21
+  horizon_days: 252
+  random_seed: 7
+  percentiles: [0.05, 0.25, 0.50, 0.75, 0.95]
+
+benchmarks:
+  buy_and_hold: [SPY]
+  sixty_forty:
+    SPY: 0.60
+    IEF: 0.40
+  equal_weight_universe: true
+  rebalance_frequency: monthly
+  risk_free_rate: 0.02             # annualised, used for Sharpe/Sortino

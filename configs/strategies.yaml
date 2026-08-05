@@ -1,0 +1,111 @@
+# Atlas strategy configuration.
+#
+# Every strategy emits a continuous signal in [-1, 1] representing desired
+# direction and conviction. Signals are NOT portfolio weights - the ensemble and
+# portfolio layers turn them into constrained, volatility-targeted weights.
+
+strategies:
+  # --------------------------------------------------------------------------
+  # Time-series trend following.
+  # Rationale: persistent, well documented cross-asset time-series momentum
+  # premium (Moskowitz, Ooi & Pedersen 2012). Long an asset trading above its
+  # long-run average, flat/short otherwise.
+  # --------------------------------------------------------------------------
+  trend:
+    enabled: true
+    weight: 0.40
+    fast_ma: 100
+    slow_ma: 200
+    momentum_lookback: 252
+    short_momentum_lookback: 63
+    # Signals with |value| below the neutral threshold are set to zero to damp
+    # turnover around the moving averages.
+    neutral_threshold: 0.05
+    long_only: true
+    # Scale the signal down when realised volatility is in an extreme percentile.
+    volatility_scaling: true
+    volatility_lookback: 63
+    volatility_percentile_cap: 0.90
+    # Weights of the four sub-components; normalised internally.
+    component_weights:
+      ma_fast: 0.25
+      ma_slow: 0.25
+      momentum_short: 0.25
+      momentum_long: 0.25
+
+  # --------------------------------------------------------------------------
+  # Short-term mean reversion.
+  # Rationale: short-horizon overreaction in liquid, index-like instruments
+  # tends to partially revert over days (Lehmann 1990, Lo & MacKinlay 1990).
+  # --------------------------------------------------------------------------
+  mean_reversion:
+    enabled: true
+    weight: 0.25
+    zscore_lookback: 20
+    return_lookback: 5
+    entry_threshold: 1.5
+    exit_threshold: 0.25
+    rsi_lookback: 14
+    rsi_weight: 0.35
+    # Do not fade a powerful long-term trend unless explicitly allowed.
+    use_trend_filter: true
+    trend_filter_ma: 200
+    # Suppress the strategy when volatility is extreme (crisis momentum regime).
+    use_volatility_filter: true
+    volatility_lookback: 20
+    volatility_percentile_cap: 0.95
+    max_holding_days: 10
+    long_only: true
+
+  # --------------------------------------------------------------------------
+  # Cross-sectional momentum.
+  # Rationale: relative-strength persistence across assets (Jegadeesh & Titman
+  # 1993; Asness, Moskowitz & Pedersen 2013). Ranked on risk-adjusted return.
+  # --------------------------------------------------------------------------
+  cross_sectional_momentum:
+    enabled: true
+    weight: 0.35
+    lookback: 252
+    skip_recent_days: 21
+    volatility_lookback: 63
+    top_k: 4
+    bottom_k: 0                 # only used when long_only is false
+    long_only: true
+    # Demean scores inside each asset class so a class with many symbols cannot
+    # dominate the cross-section purely by virtue of its symbol count.
+    neutralize_asset_class: true
+    min_assets: 4
+    # 'rank' -> continuous rank-based score; 'topk' -> equal signal to top k.
+    scoring: rank
+
+ensemble:
+  # 'regime' uses the per-regime weights from regimes.yaml,
+  # 'fixed' uses the static per-strategy weights above,
+  # 'equal' weights every enabled strategy equally (baseline).
+  mode: regime
+  use_confidence: true
+  # Exponential smoothing of the combined signal to damp turnover.
+  # smoothed_t = alpha * raw_t + (1 - alpha) * smoothed_{t-1}
+  signal_smoothing_alpha: 0.5
+  # Combined signals with magnitude below this are treated as zero.
+  min_signal: 0.02
+  # Clip the combined signal into [-clip, clip].
+  clip: 1.0
+
+regime:
+  # See configs/regimes.yaml for the detector settings and per-regime weights.
+  config_file: configs/regimes.yaml
+  enabled: true
+
+backtest:
+  start_date: "2006-01-01"
+  end_date: null
+  initial_capital: 100000
+  rebalance_frequency: weekly     # daily | weekly | monthly
+  rebalance_weekday: 4            # 0=Mon ... 4=Fri (used for weekly)
+  execution_timing: next_open     # next_open | next_close | same_close_unrealistic
+  fractional_shares: true
+  price_field: adj_close          # adj_close (total return) | close (raw + dividends)
+  benchmark: SPY
+  warmup_days: 300
+  random_seed: 7

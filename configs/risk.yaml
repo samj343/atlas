@@ -1,0 +1,86 @@
+# Portfolio construction and risk-management limits.
+#
+# The risk manager is deliberately independent of strategy logic: it receives
+# proposed target weights and either passes, scales or rejects them, recording a
+# reason for every adjustment.
+
+portfolio:
+  initial_capital: 100000
+  target_volatility: 0.10          # annualised
+  max_portfolio_volatility: 0.15   # predicted vol hard ceiling
+  max_asset_weight: 0.20
+  max_asset_class_weight: 0.50
+  max_gross_exposure: 1.25
+  max_net_exposure: 1.00
+  max_leverage: 1.25
+  minimum_cash_weight: 0.05
+  maximum_daily_turnover: 0.30
+  min_trade_weight: 0.005          # ignore trades smaller than 0.5% of equity
+  max_active_positions: 12
+  long_only: true
+  # Cap the volatility-target scaler so a low predicted vol cannot create
+  # extreme leverage.
+  max_vol_target_scaler: 3.0
+  min_vol_target_scaler: 0.1
+
+covariance:
+  method: shrinkage                # sample | shrinkage | ewma
+  lookback: 252
+  ewma_halflife: 63
+  shrinkage_intensity: null        # null -> Ledoit-Wolf analytic estimate
+  min_observations: 60
+  # Floor applied to individual asset volatilities (annualised) to avoid
+  # dividing by ~0 for cash-like instruments such as BIL.
+  min_annual_volatility: 0.005
+  # Ridge added to the diagonal if the matrix is not positive definite.
+  ridge: 0.000001
+
+volatility:
+  method: ewma                     # rolling | ewma
+  lookback: 63
+  halflife: 21
+  min_periods: 20
+  annualization_factor: 252
+  min_annual_volatility: 0.005
+
+drawdown_controls:
+  enabled: true
+  # The reference peak is the highest equity of the trailing two years, not the
+  # all-time high. Against an all-time peak the ladder is a one-way ratchet: a
+  # portfolio cut to a quarter of its risk budget cannot earn back to its old
+  # high, so the reduction never lifts. Set to 0 for an all-time peak.
+  peak_lookback_days: 504
+  # Applied to the portfolio risk budget; never liquidates automatically.
+  thresholds:
+    - drawdown: 0.05
+      multiplier: 0.75
+    - drawdown: 0.10
+      multiplier: 0.50
+    - drawdown: 0.15
+      multiplier: 0.25
+  liquidate_on_breach: false
+
+limits:
+  # --- position controls ---
+  max_order_notional: 50000
+  min_order_notional: 100
+  # --- portfolio controls ---
+  max_drawdown: 0.25               # halt new risk-increasing trades beyond this
+  daily_loss_limit: 0.04
+  weekly_loss_limit: 0.08
+  # A loss limit is a circuit breaker, not a shutdown: it lifts automatically
+  # after this many trading days. Halts requiring human judgement (unreconciled
+  # positions, repeated API failures, the kill switch) never auto-resume.
+  loss_limit_cooldown_days: 5
+  correlation_warning_threshold: 0.80
+  # --- operational controls ---
+  max_data_staleness_days: 5
+  max_consecutive_api_failures: 3
+  reconciliation_tolerance_shares: 0.01
+  reconciliation_tolerance_value: 50.0
+  reconciliation_tolerance_pct: 0.005
+
+kill_switch:
+  # When true, no orders may be created or submitted by any component.
+  enabled: false
+  reason: ""

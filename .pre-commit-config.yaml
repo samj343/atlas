@@ -1,0 +1,39 @@
+# Atlas pre-commit hooks.  Install with: make hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: debug-statements
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        files: ^src/atlas/
+        additional_dependencies: [pydantic>=2.6, types-PyYAML]
+        args: [--ignore-missing-imports]
+
+  # A last line of defence against committing credentials.
+  - repo: local
+    hooks:
+      - id: no-env-file
+        name: refuse to commit a .env file
+        entry: bash -c 'git diff --cached --name-only | grep -qx ".env" && { echo "Refusing to commit .env"; exit 1; } || exit 0'
+        language: system
+        pass_filenames: false

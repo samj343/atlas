@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Every job runs in backtest mode. No workflow may reach a broker: the
+  # broker-dependent tests are mocked, and no credential exists in CI.
+  EXECUTION_MODE: backtest
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint:
+    name: Lint and type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,data,dashboard]"
+
+      - name: Ruff
+        run: ruff check src tests scripts
+
+      - name: Ruff format check
+        run: ruff format --check src tests scripts
+        continue-on-error: true
+
+      - name: mypy
+        run: mypy src/atlas
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The engine records the commit hash on every run.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,data,dashboard]"
+
+      - name: Unit tests
+        run: pytest tests/unit -q --junitxml=junit-unit.xml
+
+      - name: Integration tests (mocked broker, no network)
+        run: pytest tests/integration -q -m "not slow" --junitxml=junit-integration.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.python-version }}
+          path: junit-*.xml
+          if-no-files-found: ignore
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,data,dashboard]"
+
+      - name: Run tests with coverage
+        run: |
+          pytest -m "not slow" \
+            --cov=atlas \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+
+  smoke:
+    name: End-to-end smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,data,dashboard]"
+
+      # The synthetic provider needs no network, so CI exercises the real
+      # pipeline end to end without depending on a data vendor being up.
+      - name: CLI is wired up
+        run: |
+          atlas --version
+          atlas info
+          atlas show-config --section risk > /dev/null
+
+      - name: Data download and validation
+        run: |
+          atlas download-data --provider synthetic --start 2010-01-01 --end 2016-12-31
+          atlas validate-data --provider synthetic --start 2010-01-01 --end 2016-12-31
+
+      - name: Backtest with benchmarks, stress tests and report
+        run: |
+          atlas backtest --provider synthetic --start 2010-01-01 --end 2016-12-31
+
+      - name: Dry-run order preview against the mock broker
+        run: |
+          atlas order-preview --provider synthetic --mock
+
+      - name: Reconciliation
+        run: atlas reconcile --mock
+
+      - name: Assert live trading is refused
+        run: |
+          if EXECUTION_MODE=live atlas info 2>/dev/null; then
+            echo "FAIL: live mode was accepted"; exit 1
+          else
+            echo "OK: live mode is refused"
+          fi
+
+      - name: Upload research artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-artifacts
+          path: reports/backtests/
+          if-no-files-found: ignore
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No .env file is committed
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "FAIL: .env is tracked by git"; exit 1
+          fi
+          echo "OK: no .env is tracked"
+
+      - name: No obvious credentials in the tree
+        run: |
+          # `.env.example` documents variable names and is expected to match.
+          if grep -rInE '(password|api[_-]?key|secret|access[_-]?token)\s*[:=]\s*["'"'"'][^"'"'"']{8,}' \
+              --include='*.py' --include='*.yaml' --include='*.yml' --include='*.toml' \
+              src configs scripts tests; then
+            echo "FAIL: a possible hard-coded credential was found"; exit 1
+          fi
+          echo "OK: no hard-coded credentials found"
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: atlas-trading-system:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: The image runs
+        run: docker run --rm atlas-trading-system:ci atlas info
+
+      - name: Tests pass inside the image
+        run: docker run --rm -e EXECUTION_MODE=backtest atlas-trading-system:ci pytest tests/unit -q

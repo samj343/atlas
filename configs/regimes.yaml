@@ -1,0 +1,86 @@
+# Market-regime detection and regime-conditional strategy weights.
+#
+# The baseline detector is deliberately rules-based and interpretable. Every
+# input is computed from information available strictly on or before the
+# classification date (see src/atlas/regimes/rules_based.py).
+
+detector:
+  type: rules_based             # rules_based | clustering
+  benchmark: SPY
+
+  # Direction: benchmark close vs its trend moving average.
+  trend_ma: 200
+  # Volatility: realised vol of benchmark daily returns.
+  volatility_lookback: 20
+  # Volatility percentile is measured against an expanding window of history
+  # (never the full sample) with this minimum number of observations.
+  volatility_percentile_window: 756
+  volatility_percentile_min_obs: 252
+  # Above this percentile the regime is classified as high volatility.
+  high_volatility_percentile: 0.70
+
+  # Supporting indicators recorded alongside the discrete label.
+  breadth_ma: 200
+  correlation_lookback: 63
+  drawdown_lookback: 252
+  # Breadth below this fraction is flagged as deteriorating.
+  weak_breadth_threshold: 0.40
+
+  # Persistence filter: a new regime must hold for this many consecutive days
+  # before it is accepted, which prevents one-day whipsaws in the label.
+  min_regime_days: 3
+
+clustering:
+  # Optional ML comparison model. Never replaces the rules-based baseline; it is
+  # fitted on training data only and evaluated against it.
+  enabled: false
+  n_clusters: 4
+  features: [trend_score, volatility, breadth, avg_correlation, drawdown]
+  standardize: true
+  random_state: 7
+  # Minimum training observations before the model may be used.
+  min_train_obs: 500
+
+# Discrete regimes:
+#   bull_low_vol  - benchmark above trend MA, volatility below threshold
+#   bull_high_vol - benchmark above trend MA, volatility above threshold
+#   bear_low_vol  - benchmark below trend MA, volatility below threshold
+#   bear_high_vol - benchmark below trend MA, volatility above threshold
+#
+# Strategy weights per regime. Each block is normalised to sum to 1 before risk
+# scaling. `risk_multiplier` scales the portfolio's volatility target, and
+# `defensive_weight` is the minimum allocation routed to the defensive asset.
+regime_weights:
+  bull_low_vol:
+    trend: 0.40
+    mean_reversion: 0.30
+    cross_sectional_momentum: 0.30
+    risk_multiplier: 1.00
+    defensive_weight: 0.00
+
+  bull_high_vol:
+    trend: 0.50
+    mean_reversion: 0.15
+    cross_sectional_momentum: 0.35
+    risk_multiplier: 0.85
+    defensive_weight: 0.05
+
+  bear_low_vol:
+    trend: 0.45
+    mean_reversion: 0.30
+    cross_sectional_momentum: 0.25
+    risk_multiplier: 0.70
+    defensive_weight: 0.10
+
+  bear_high_vol:
+    trend: 0.60
+    mean_reversion: 0.10
+    cross_sectional_momentum: 0.30
+    risk_multiplier: 0.50
+    defensive_weight: 0.20
+
+# Applied when breadth falls below `weak_breadth_threshold`, on top of the
+# regime's own defensive weight.
+breadth_overlay:
+  enabled: true
+  additional_defensive_weight: 0.10

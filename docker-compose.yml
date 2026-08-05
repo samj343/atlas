@@ -1,0 +1,83 @@
+# Atlas - local development and demonstration stack.
+#
+#   docker compose up dashboard      # the Streamlit dashboard on :8501
+#   docker compose run --rm backtest # a full backtest with a research report
+#   docker compose run --rm tests    # the test suite
+#
+# Interactive Brokers connectivity:
+#   TWS or IB Gateway runs on the host, not in a container. `host.docker.internal`
+#   resolves to the host from inside the container (on Linux this needs the
+#   extra_hosts entry below). The API must also be configured to accept
+#   connections from the Docker bridge network.
+
+services:
+  dashboard:
+    build: .
+    image: atlas-trading-system:latest
+    command: ["streamlit", "run", "src/atlas/dashboard/app.py",
+              "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./configs:/app/configs:ro
+      - atlas-data:/app/data
+      - atlas-reports:/app/reports
+    environment:
+      EXECUTION_MODE: dry_run
+      ATLAS_LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backtest:
+    build: .
+    image: atlas-trading-system:latest
+    command: ["atlas", "backtest", "--provider", "synthetic"]
+    volumes:
+      - ./configs:/app/configs:ro
+      - atlas-data:/app/data
+      - atlas-reports:/app/reports
+    environment:
+      EXECUTION_MODE: backtest
+
+  experiment:
+    build: .
+    image: atlas-trading-system:latest
+    command: ["python", "scripts/run_baseline_experiment.py", "--provider", "synthetic"]
+    volumes:
+      - ./configs:/app/configs:ro
+      - atlas-data:/app/data
+      - atlas-reports:/app/reports
+    environment:
+      EXECUTION_MODE: backtest
+
+  tests:
+    build: .
+    image: atlas-trading-system:latest
+    command: ["pytest", "-q", "-m", "not slow"]
+    environment:
+      EXECUTION_MODE: backtest
+
+  paper-trader:
+    build: .
+    image: atlas-trading-system:latest
+    # Previews orders by default. Set EXECUTION_MODE=paper and an account
+    # allowlist in .env to submit to an Interactive Brokers paper account.
+    command: ["atlas", "order-preview", "--provider", "synthetic"]
+    volumes:
+      - ./configs:/app/configs:ro
+      - atlas-data:/app/data
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ATLAS_IBKR_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  atlas-data:
+  atlas-reports:

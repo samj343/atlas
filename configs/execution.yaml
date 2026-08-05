@@ -1,0 +1,71 @@
+# Execution settings: transaction costs (used in backtests) and broker
+# connectivity (used for dry-run and paper trading).
+#
+# Atlas is a paper-trading system. `live` is not implemented; it exists only as a
+# disabled placeholder so the mode enumeration is explicit.
+
+mode: dry_run                      # backtest | dry_run | paper   (live is disabled)
+
+costs:
+  commission_per_order: 0.0        # fixed $ per order
+  commission_per_share: 0.005      # $ per share (IBKR tiered-like)
+  min_commission: 1.0              # $ minimum per order
+  max_commission_pct: 0.005        # commission capped at 0.5% of trade value
+  half_spread_bps: 1.0             # half the quoted bid-ask spread, in bps
+  slippage_bps: 2.0                # additional adverse price movement, in bps
+  # Market impact ~ coefficient * sigma_daily * sqrt(participation).
+  market_impact_enabled: true
+  market_impact_coefficient: 0.10
+  # Participation is trade shares / average daily volume.
+  adv_lookback: 21
+  # Fraction of ADV above which fills become partial.
+  max_participation: 0.05
+
+fills:
+  # Simulated broker behaviour in the backtest engine.
+  allow_partial_fills: true
+  reject_if_no_price: true
+  # Probability-free, deterministic model: an order larger than
+  # max_participation * ADV fills only up to that size on the bar.
+  deterministic: true
+
+broker:
+  provider: ibkr
+  host: 127.0.0.1
+  port: 7497                       # 7497 = TWS paper, 4002 = IB Gateway paper
+  client_id: 17
+  # Account allowlist. Paper accounts start with 'DU'. Orders are rejected if the
+  # connected account is not in this list. Set via ATLAS_IBKR_ACCOUNT_ALLOWLIST.
+  account_allowlist: []
+  require_paper_account: true      # refuse to trade a non-'DU' account
+  connect_timeout_seconds: 15
+  request_timeout_seconds: 30
+  market_data_type: 3              # 1=live, 2=frozen, 3=delayed, 4=delayed-frozen
+  read_retry_attempts: 3
+  read_retry_backoff_seconds: 2.0
+  # Order submissions are never blindly retried.
+  order_retry_attempts: 0
+
+trading_window:
+  # Orders outside this window (exchange local time) are rejected.
+  timezone: America/New_York
+  start: "09:35"
+  end: "15:55"
+  trading_days: [0, 1, 2, 3, 4]    # 0 = Monday
+
+order_defaults:
+  order_type: MKT                  # MKT | LMT
+  time_in_force: DAY
+  limit_offset_bps: 5.0            # used when order_type is LMT
+  # Duplicate suppression window: an identical (symbol, side, qty) order within
+  # this many seconds is rejected as a duplicate.
+  duplicate_window_seconds: 300
+
+reconciliation:
+  enabled: true
+  block_on_mismatch: true
+  tolerance_shares: 0.01
+  tolerance_value: 50.0
+  tolerance_pct: 0.005
+  # Give the broker this long to reflect recent fills before flagging.
+  settle_delay_seconds: 5
