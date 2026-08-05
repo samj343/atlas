@@ -21,7 +21,8 @@ from atlas.execution.reconciliation import Reconciler
 
 @pytest.fixture
 def prices(short_panel) -> pd.Series:
-    return short_panel.adj_close.iloc[-1]
+    # Raw, because that is the scale a broker quotes on.
+    return short_panel.close.iloc[-1]
 
 
 @pytest.fixture
@@ -275,6 +276,55 @@ class TestPersistedExecution:
         stored = repository.recent_orders(session_id=manager.session_id)
         assert len(stored) == len(result.submitted)
         assert set(stored["execution_mode"]) == {"paper"}
+
+
+class TestPriceScaleAgainstTheBroker:
+    """Marks used against a broker must be on the broker's own price scale.
+
+    Vendors report OHLC raw and supply a separate adjusted close; a broker
+    quotes and settles raw. Sizing orders off an adjusted close overstates the
+    share count by the whole accumulated dividend adjustment.
+    """
+
+    def test_marks_fall_back_to_the_raw_close(self, config, short_panel):
+        manager = OrderManager(config, broker=None)
+        reference = short_panel.dates.max()
+        marks = manager._current_prices(short_panel, reference)
+
+        expected = short_panel.close.loc[:reference].ffill().iloc[-1]
+        pd.testing.assert_series_equal(marks, expected, check_names=False)
+
+    def test_a_quote_gap_is_filled_on_the_quote_scale(self, config, short_panel, prices):
+        """A symbol the broker cannot quote must not be marked on a second scale."""
+        missing = prices.index[0]
+        broker = MockBrokerClient(prices=prices.drop(missing), initial_cash=100_000.0)
+        broker.connect()
+        manager = OrderManager(config, broker=broker)
+        reference = short_panel.dates.max()
+
+        marks = manager._current_prices(short_panel, reference)
+
+        raw = short_panel.close.loc[:reference].ffill().iloc[-1]
+        assert marks[missing] == pytest.approx(raw[missing])
+        # And the gap-filled name sits on the same scale as the quoted ones.
+        quoted = [s for s in marks.index if s != missing]
+        pd.testing.assert_series_equal(
+            marks[quoted],
+            prices.drop(missing)[quoted],
+            check_names=False,
+            check_index_type=False,
+        )
+
+    def test_the_mock_broker_agrees_with_the_local_marks(self, config, short_panel, prices):
+        """No position mismatch can arise purely from a valuation scale."""
+        broker = MockBrokerClient(prices=prices, initial_cash=100_000.0)
+        broker.connect()
+        manager = OrderManager(config, broker=broker)
+        reference = short_panel.dates.max()
+
+        marks = manager._current_prices(short_panel, reference)
+        quotes = broker.get_market_prices(list(short_panel.symbols))
+        pd.testing.assert_series_equal(marks, quotes, check_names=False)
 
 
 class TestSafetyGuarantees:

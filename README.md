@@ -344,11 +344,12 @@ make coverage
 make check         # lint + type-check + test
 ```
 
-459 tests (456 fast, 3 marked slow). The ones that matter most:
+462 tests (459 fast, 3 marked slow). The ones that matter most:
 
 - `tests/unit/test_lookahead.py` — perturbs the future, asserts the past does not
-  move; checks that walk-forward windows never overlap and that no fill lands on
-  its own signal bar.
+  move; checks that walk-forward windows never overlap, that no fill lands on its
+  own signal bar, and that execution and valuation prices share one scale (raw
+  OHLC versus adjusted close is a real source of phantom P&L).
 - `tests/unit/test_risk.py` — every limit, the kill switch, the halt cool-off,
   and the drawdown-ratchet regression.
 - `tests/unit/test_edge_cases.py` — empty data, singular covariance, zero

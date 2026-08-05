@@ -662,21 +662,32 @@ class OrderManager:
             )
 
     def _current_prices(self, panel: PricePanel, reference: pd.Timestamp) -> pd.Series:
-        """Prices for the cycle: live quotes when connected, else the last close."""
+        """Prices for the cycle: live quotes when connected, else the last close.
+
+        These are *traded* prices, so they come from the **raw** close, never the
+        adjusted one. They size orders, value positions and feed the risk marks,
+        and every one of those is compared against a broker that quotes raw
+        prices and reports raw cash. Mixing a broker quote for one symbol with an
+        adjusted close for another - which is what a `fillna` across the two
+        scales produces - would misstate exposure by the whole accumulated
+        dividend adjustment on the gap-filled names.
+        """
+        raw_closes = panel.close.loc[:reference]
         if self.broker is not None and self.broker.connected:
             try:
                 quotes = self.broker.get_market_prices(list(panel.symbols))
                 if quotes.notna().any():
                     # Fill any gaps from the last close rather than dropping the symbol.
-                    closes = panel.adj_close.loc[:reference].ffill().iloc[-1]
-                    return quotes.fillna(closes)
+                    if raw_closes.empty:
+                        return quotes
+                    return quotes.fillna(raw_closes.ffill().iloc[-1])
             except Exception as exc:
                 self._log.warning(
                     "live prices unavailable; falling back to the last close",
                     extra={"context": {"error": str(exc)}},
                 )
                 self.risk_manager.record_api_failure("get_market_prices")
-        frame = panel.adj_close.loc[:reference]
+        frame = raw_closes
         if frame.empty:
             return pd.Series(dtype="float64")
         return frame.ffill().iloc[-1]

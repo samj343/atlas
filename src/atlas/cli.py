@@ -636,7 +636,9 @@ def order_preview(
     broker: BrokerClient
     if mock:
         broker = MockBrokerClient(
-            prices=panel.adj_close.iloc[-1], initial_cash=config.portfolio.initial_capital
+            # A mock broker must quote what a real one quotes: raw prices.
+            prices=panel.close.iloc[-1],
+            initial_cash=config.portfolio.initial_capital,
         )
     else:
         broker = IBKRClient(config.execution)
@@ -687,7 +689,9 @@ def paper_trade(ctx: click.Context, provider: str | None, mock: bool, yes: bool)
     broker: BrokerClient
     if mock:
         broker = MockBrokerClient(
-            prices=panel.adj_close.iloc[-1], initial_cash=config.portfolio.initial_capital
+            # A mock broker must quote what a real one quotes: raw prices.
+            prices=panel.close.iloc[-1],
+            initial_cash=config.portfolio.initial_capital,
         )
     else:
         broker = IBKRClient(config.execution)

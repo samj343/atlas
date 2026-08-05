@@ -109,7 +109,8 @@ def _preview(config: AtlasConfig, settings: dict[str, Any], use_mock: bool) -> N
     panel, _ = get_panel(
         settings["provider"], settings["start"], settings["end"], config.config_hash
     )
-    prices = panel.adj_close.iloc[-1]
+    # A mock broker must quote what a real one quotes: raw prices.
+    prices = panel.close.iloc[-1]
 
     broker = (
         MockBrokerClient(prices=prices, initial_cash=config.portfolio.initial_capital)

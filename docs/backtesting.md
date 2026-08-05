@@ -62,9 +62,20 @@ positions on. With `price_field: adj_close` (the default) orders fill at
 `open x (adj_close / close)`; with `price_field: close` they fill at the raw open
 and dividends are credited separately as cash.
 
-`tests/unit/test_lookahead.py::TestPriceScaleInExecution` guards this by
-asserting that no daily portfolio return can exceed what its gross exposure and
-the worst single-asset move allow.
+The live path follows the same rule from the other direction. A broker quotes,
+fills and settles on the **raw** scale, so everything the paper trader compares
+against it — order sizing, position marks, reconciliation — uses `close`, never
+`adj_close`. Mock brokers in tests and in the dashboard preview are seeded with
+raw prices for the same reason.
+
+Two suites guard this:
+
+- `tests/unit/test_lookahead.py::TestPriceScaleInExecution` asserts that no daily
+  portfolio return exceeds what its gross exposure and the worst single-asset
+  move allow, and that kurtosis stays plausible.
+- `tests/integration/test_execution.py::TestPriceScaleAgainstTheBroker` asserts
+  that local marks match the broker's own quotes, and that a symbol the broker
+  cannot quote is gap-filled on the quote scale rather than a second one.
 
 ## Cash accounting
 
