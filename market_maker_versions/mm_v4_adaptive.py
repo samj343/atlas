@@ -1,10 +1,9 @@
-"""Binary-option market maker (final).
+"""Market maker evolution 4/4 -- "adaptive" (final).
 
-Exact model pricing (rate-chain dynamic program, closed-form lognormal tails,
-sector-correlated spreads), parameters estimated from warm-up history and
-re-fit online each day, uncertainty- and toxicity-aware quoting, inventory
-control, and a grader-faithful max-loss cash mirror that makes bankruptcy
-impossible by construction.
+v3 plus online learning: parameters re-fit daily as the session reveals new
+data, spreads widen with model uncertainty (one-standard-error reprice) and
+against counterparties whose flow keeps costing money (markout-EMA toxicity),
+while benign flow keeps tighter, more competitive quotes than v3.
 """
 
 import math
@@ -546,9 +545,9 @@ def _estimate_market_parameters(market_history: MarketHistory) -> MarketParamete
 
 
 # ============================================================================
-# YOUR MARKET MAKER
+# YOUR MARKET MAKER -- v4 "adaptive"
 #
-# Design notes:
+# Evolution over v3:
 #   * keeps learning after warm-up: each day's new observation is appended to
 #     the history and the parameters are re-fit, so estimates sharpen over the
 #     session instead of freezing at warm-up.
@@ -749,7 +748,7 @@ class MarketMaker:
 
     @property
     def name(self) -> str:
-        return "AtlasMM"
+        return "AtlasMM-v4"
 
     def price_option(self, option: BinaryOption) -> float:
         params = self._estimated_parameters

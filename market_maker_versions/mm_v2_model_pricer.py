@@ -1,10 +1,9 @@
-"""Binary-option market maker (final).
+"""Market maker evolution 2/4 -- "model pricer".
 
-Exact model pricing (rate-chain dynamic program, closed-form lognormal tails,
-sector-correlated spreads), parameters estimated from warm-up history and
-re-fit online each day, uncertainty- and toxicity-aware quoting, inventory
-control, and a grader-faithful max-loss cash mirror that makes bankruptcy
-impossible by construction.
+Exact model-based pricing (rate-chain dynamic program + closed-form lognormal
+tails + sector-correlated spreads) with parameters estimated from the warm-up
+history, and grader-faithful cash accounting. Risk management still naive:
+fixed spread/size, all-in caps, 1-cent FOK edge, no inventory control.
 """
 
 import math
@@ -546,32 +545,25 @@ def _estimate_market_parameters(market_history: MarketHistory) -> MarketParamete
 
 
 # ============================================================================
-# YOUR MARKET MAKER
+# YOUR MARKET MAKER -- v2 "model pricer"
 #
-# Design notes:
-#   * keeps learning after warm-up: each day's new observation is appended to
-#     the history and the parameters are re-fit, so estimates sharpen over the
-#     session instead of freezing at warm-up.
-#   * uncertainty-aware spreads: every option is re-priced under parameters
-#     bumped by one standard error (company drifts, rate up-probability); the
-#     price gap widens the quote exactly where the model is unsure, letting
-#     the base spread be tighter and more competitive everywhere else.
-#   * counterparty toxicity tracking: one-day markouts per counterparty feed
-#     an EMA; flow that keeps costing money sees wider quotes, smaller sizes,
-#     and stricter FOK edge requirements, while benign flow keeps tight
-#     competitive quotes.
-# Retains v3's exact grader cash mirror and fractional risk budgets, so
-# bankruptcy remains impossible by construction.
+# Evolution over v1: pricing is now exact -- a dynamic program over the FED
+# rate Markov chain (reversion tilt and zero floor included), closed-form
+# lognormal tails for company legs conditioned on the terminal rate, a
+# closed-form ratio reduction for zero-strike spreads, and numeric integration
+# over the shared sector shock otherwise. Parameters are estimated from the
+# warm-up history, and the cash mirror now credits expiry payoffs like the
+# autograder does. Risk management is still naive: a fixed 3-cent half
+# spread, fixed size capped only by "max loss <= all remaining cash" (happy
+# to bet the whole bankroll on one option), no inventory management, and FOKs
+# trade on a 1-cent edge with no size discipline.
 # ============================================================================
 
 
 class MarketMaker:
-    RISK_FRACTION: Final[float] = 0.10
-    FOK_RISK_FRACTION: Final[float] = 0.30
-    MAX_QUOTE_QUANTITY: Final[int] = 60
-    POSITION_CAP: Final[int] = 75
-    TOXICITY_EMA: Final[float] = 0.30
-    MAX_HISTORY: Final[int] = 1500
+    HALF_SPREAD: Final[float] = 0.03
+    QUOTE_SIZE: Final[int] = 25
+    FOK_EDGE: Final[float] = 0.01
 
     def __init__(
         self,
@@ -584,8 +576,7 @@ class MarketMaker:
         self.cash_balance: float = cash_balance
         self.position: Position = Position()
 
-        # Worst-case cash tracking mirrors the autograder: every trade reserves
-        # its maximum loss immediately; expiries can only credit cash back.
+        # Mirrors the autograder: reserve max loss per trade, credit expiries.
         self._tracked_cash: float = cash_balance
         self._estimated_parameters: MarketParameters | None = None
         self._fallback_params: MarketParameters | None = None
@@ -598,19 +589,13 @@ class MarketMaker:
         self._gross_long_by_option_id: dict[int, int] = defaultdict(int)
         self._gross_short_by_option_id: dict[int, int] = defaultdict(int)
 
-        self._observed_values: dict[int, list[float]] | None = None
-        self._bump_parameters: MarketParameters | None = None
-        self._trades_today: list[tuple[int, int, int, float]] = []  # (counterparty, option_id, signed qty, price)
-        self._toxicity: dict[int, list[float]] = {}  # counterparty -> [markout EMA, trade count]
-
     def on_step_advance(self, new_underlying_state: list[Underlying], new_option_state: list[BinaryOption]) -> None:
         new_values = {u.underlying_id: u.value for u in new_underlying_state}
-        old_known = dict(self._known_options)
         new_ids = {o.option_id for o in new_option_state}
         for option in new_option_state:
             if option.steps_until_expiry == 0:
                 self._settle_option(option, new_values)
-        for option in old_known.values():
+        for option in list(self._known_options.values()):
             if option.option_id not in new_ids:
                 self._settle_option(option, new_values)
 
@@ -618,29 +603,6 @@ class MarketMaker:
         self.active_option_state = new_option_state
         self._known_options = {o.option_id: o for o in new_option_state}
         self._price_cache.clear()
-
-        # Online learning: fold the newly observed day into the estimates.
-        if self._observed_values is not None:
-            for underlying_id, value in new_values.items():
-                self._observed_values.setdefault(underlying_id, []).append(value)
-            self._refit()
-
-        # One-day markouts feed the per-counterparty toxicity EMA.
-        option_by_id = {o.option_id: o for o in new_option_state}
-        for counterparty_id, option_id, quantity, price in self._trades_today:
-            option = option_by_id.get(option_id)
-            if option is not None:
-                fair_now = self.price_option(option)
-            elif option_id in old_known:
-                fair_now = old_known[option_id].expiry_valuation(new_values)
-            else:
-                continue
-            side = 1.0 if quantity > 0 else -1.0
-            markout = (fair_now - price) * side  # positive = the trade aged well for us
-            entry = self._toxicity.setdefault(counterparty_id, [0.0, 0])
-            entry[0] = (1.0 - self.TOXICITY_EMA) * entry[0] + self.TOXICITY_EMA * markout
-            entry[1] += 1
-        self._trades_today = []
 
     def on_trade(self, option: BinaryOption, price: float, quantity: int, counterparty_id: int) -> None:
         self.position.add_option_quantity(option.option_id, quantity)
@@ -653,7 +615,6 @@ class MarketMaker:
             self._gross_short_by_option_id[option.option_id] += -quantity
         self._tracked_cash -= max_loss
         self.cash_balance = self._tracked_cash
-        self._trades_today.append((counterparty_id, option.option_id, quantity, price))
 
     def _settle_option(self, option: BinaryOption, value_by_underlying_id: dict[int, float]) -> None:
         option_id = option.option_id
@@ -688,68 +649,9 @@ class MarketMaker:
             )
         return self._fallback_params
 
-    def _refit(self) -> None:
-        if not self._observed_values:
-            return
-        for series in self._observed_values.values():
-            if len(series) > self.MAX_HISTORY:
-                del series[: len(series) - self.MAX_HISTORY]
-        history = MarketHistory(
-            values_by_underlying_id={uid: tuple(vals) for uid, vals in self._observed_values.items()}
-        )
-        try:
-            params = _estimate_market_parameters(history)
-        except Exception:
-            return
-        self._estimated_parameters = params
-        self._bump_parameters = self._build_bump_parameters(params, history.num_days - 1)
-
-    def _build_bump_parameters(self, params: MarketParameters, num_obs: int) -> MarketParameters | None:
-        """Parameters shifted by ~1 standard error, used to gauge pricing uncertainty."""
-        if num_obs < 3:
-            return None
-        try:
-            sqrt_n = math.sqrt(num_obs)
-            se_ajr = math.hypot(params.ajarai_sector_beta * params.sector_std_dev, params.ajarai_idio_std_dev) / sqrt_n
-            se_thr = (
-                math.hypot(params.theriodic_sector_beta * params.sector_std_dev, params.theriodic_idio_std_dev)
-                / sqrt_n
-            )
-            up = params.rate_up_probability
-            se_up = math.sqrt(max(up * (1.0 - up), 0.0) / num_obs)
-            up_bumped = min(up + se_up, 0.9)
-            down = params.rate_down_probability
-            if up_bumped + down > 0.99:
-                down = max(0.99 - up_bumped, 1e-3)
-            return replace(
-                params,
-                ajarai_drift=params.ajarai_drift + se_ajr,
-                theriodic_drift=params.theriodic_drift + se_thr,
-                rate_up_probability=up_bumped,
-                rate_down_probability=down,
-            )
-        except Exception:
-            return None
-
-    def _toxicity_penalty(self, counterparty_id: int) -> float:
-        """Extra spread (in price) against flow that has demonstrably cost us money."""
-        entry = self._toxicity.get(counterparty_id)
-        if entry is None or entry[1] < 3:
-            return 0.0  # not enough evidence -- markouts are noisy
-        return min(max(-(entry[0] + 0.01) * 1.5, 0.0), 0.04)
-
-    def _pricing_uncertainty(self, option: BinaryOption, fair: float) -> float:
-        bump = self._bump_parameters
-        if bump is None:
-            return 0.01
-        try:
-            return min(abs(self.price_option_from_parameters(bump, option) - fair), 0.05)
-        except Exception:
-            return 0.01
-
     @property
     def name(self) -> str:
-        return "AtlasMM"
+        return "AtlasMM-v2"
 
     def price_option(self, option: BinaryOption) -> float:
         params = self._estimated_parameters
@@ -780,92 +682,52 @@ class MarketMaker:
 
     def quote(self, option: BinaryOption, counterparty_id: int) -> Quote:
         try:
-            return self._make_quote(option, counterparty_id)
+            return self._make_quote(option)
         except Exception:
             return Quote(bid_price=0.0, bid_quantity=1, offer_price=1.0, offer_quantity=1)
 
-    def _make_quote(self, option: BinaryOption, counterparty_id: int) -> Quote:
+    def _make_quote(self, option: BinaryOption) -> Quote:
         cash = self._tracked_cash
         if cash < 0.25:
             return Quote(bid_price=0.0, bid_quantity=1, offer_price=1.0, offer_quantity=1)
-
         fair = self.price_option(option)
-        toxicity_widen = self._toxicity_penalty(counterparty_id)
-        uncertainty = self._pricing_uncertainty(option, fair)
-        half_spread = 0.015 + 0.048 * fair * (1.0 - fair) + 0.6 * uncertainty + toxicity_widen
-
-        # Shade toward shedding inventory, but never quote through fair value.
-        net_position = self.position.option_quantity_by_option_id.get(option.option_id, 0)
-        skew_limit = max(half_spread - 0.005, 0.0)
-        skew = min(max(-0.002 * net_position, -skew_limit), skew_limit)
-        center = min(max(fair + skew, 0.005), 0.995)
-
-        bid = math.floor((center - half_spread) * 100 + 1e-9) / 100.0
-        offer = math.ceil((center + half_spread) * 100 - 1e-9) / 100.0
+        bid = math.floor((fair - self.HALF_SPREAD) * 100 + 1e-9) / 100.0
+        offer = math.ceil((fair + self.HALF_SPREAD) * 100 - 1e-9) / 100.0
         bid = min(max(bid, 0.0), 0.99)
         offer = min(max(offer, 0.01), 1.0)
         if bid >= offer:
             bid = max(0.0, round(offer - 0.01, 2))
 
-        # Fractional budget keeps any fill sequence solvent; toxic flow gets less.
-        budget = self.RISK_FRACTION * cash * (0.5 if toxicity_widen > 0.015 else 1.0)
-        if bid > budget:
-            bid = max(math.floor(budget * 100) / 100.0, 0.0)
-            if bid >= offer:
-                bid = max(0.0, round(offer - 0.01, 2))
+        # Naive sizing: fixed size, capped only by the entire remaining bankroll.
+        bid_quantity = self.QUOTE_SIZE
+        offer_quantity = self.QUOTE_SIZE
+        if bid > 0 and bid * bid_quantity > cash:
+            bid_quantity = int(cash / bid)
+            if bid_quantity < 1:
+                bid, bid_quantity = 0.0, 1
         offer_loss = 1.0 - offer
-        if offer_loss > budget:
-            offer = min(math.ceil((1.0 - budget) * 100) / 100.0, 1.0)
-            if offer <= bid:
-                offer = min(1.0, round(bid + 0.01, 2))
-            offer_loss = 1.0 - offer
-
-        bid_quantity = int(budget / bid) if bid > 0.004 else self.MAX_QUOTE_QUANTITY
-        offer_quantity = int(budget / offer_loss) if offer_loss > 0.004 else self.MAX_QUOTE_QUANTITY
-        # Inventory cap: stop growing a one-sided position in any single option.
-        bid_quantity = min(bid_quantity, max(self.POSITION_CAP - net_position, 1))
-        offer_quantity = min(offer_quantity, max(self.POSITION_CAP + net_position, 1))
-        bid_quantity = max(1, min(bid_quantity, self.MAX_QUOTE_QUANTITY))
-        offer_quantity = max(1, min(offer_quantity, self.MAX_QUOTE_QUANTITY))
-        return Quote(
-            bid_price=bid,
-            bid_quantity=bid_quantity,
-            offer_price=offer,
-            offer_quantity=offer_quantity,
-        )
+        if offer_loss * offer_quantity > cash:
+            offer_quantity = int(cash / offer_loss) if offer_loss > 0 else self.QUOTE_SIZE
+            if offer_quantity < 1:
+                offer, offer_quantity = 1.0, 1
+        if bid >= offer:
+            bid = max(0.0, round(offer - 0.01, 2))
+        return Quote(bid_price=bid, bid_quantity=bid_quantity, offer_price=offer, offer_quantity=offer_quantity)
 
     def respond_to_fok(self, option: BinaryOption, fok_order: FokOrder) -> bool:
         try:
             fair = self.price_option(option)
-            uncertainty = self._pricing_uncertainty(option, fair)
-            required_edge = (
-                0.012
-                + 0.012 * fair * (1.0 - fair)
-                + 0.5 * uncertainty
-                + self._toxicity_penalty(fok_order.counterparty_id)
-            )
             if fok_order.order_type == OrderType.BUY:
-                # Counterparty buys: we would sell at the order price.
                 max_loss = fok_order.quantity * (1.0 - fok_order.price)
-                if max_loss > self.FOK_RISK_FRACTION * self._tracked_cash:
-                    return False
-                return fok_order.price >= fair + required_edge
-            # Counterparty sells: we would buy at the order price.
+                return max_loss <= self._tracked_cash and fok_order.price >= fair + self.FOK_EDGE
             max_loss = fok_order.quantity * fok_order.price
-            if max_loss > self.FOK_RISK_FRACTION * self._tracked_cash:
-                return False
-            return fok_order.price <= fair - required_edge
+            return max_loss <= self._tracked_cash and fok_order.price <= fair - self.FOK_EDGE
         except Exception:
             return False
 
     def warm_up(self, market_history: MarketHistory) -> None:
         try:
-            self._observed_values = {
-                underlying_id: list(vals) for underlying_id, vals in market_history.values_by_underlying_id.items()
-            }
-            self._refit()
-            if self._estimated_parameters is None:
-                self._estimated_parameters = self._fallback_parameters()
+            self._estimated_parameters = _estimate_market_parameters(market_history)
         except Exception:
             self._estimated_parameters = self._fallback_parameters()
         self._price_cache.clear()
