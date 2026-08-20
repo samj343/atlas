@@ -2,10 +2,10 @@
 
 Exact model pricing (rate-chain dynamic program, closed-form lognormal tails,
 sector-correlated spreads) with parameters estimated from warm-up history and
-re-fit online every day. Quoting keeps the live-grader-proven posture: a flat
-competitive spread with inventory skew bounded inside it, bankroll-scaled
-sizes, a permissive but risk-capped FOK policy, and a grader-faithful
-max-loss cash mirror so bankruptcy is impossible by construction.
+re-fit online every day. Quoting keeps the live-grader-proven v2 posture --
+flat 3-cent spread, centered quotes, permissive 1-cent FOK edge -- with
+bankroll-scaled sizes and a grader-faithful max-loss cash mirror so
+bankruptcy is impossible by construction.
 """
 
 import math
@@ -547,9 +547,9 @@ def _estimate_market_parameters(market_history: MarketHistory) -> MarketParamete
 
 
 # ============================================================================
-# YOUR MARKET MAKER
+# YOUR MARKET MAKER -- v6 "refit" (v2 chassis + online learning + scaled sizes)
 #
-# Design notes: live grader results showed v2's permissive posture (flat competitive
+# Live grader results showed v2's permissive posture (flat competitive
 # spread, fixed meaningful size, 1-cent FOK edge, no position caps) earning
 # the most, with v4's adaptivity second. v5 keeps v2's posture and adds only
 # the upgrades that never cost volume:
@@ -574,7 +574,8 @@ class MarketMaker:
     QUOTE_SIZE_MAX: Final[int] = 80
     SIZE_FRACTION: Final[float] = 0.30
     FOK_EDGE: Final[float] = 0.01
-    FOK_RISK_FRACTION: Final[float] = 0.50
+    FOK_RISK_FRACTION: Final[float] = 1.0
+    SKEW_COEF: Final[float] = 0.0
     MAX_HISTORY: Final[int] = 1500
 
     def __init__(
@@ -727,7 +728,7 @@ class MarketMaker:
         # Shade toward shedding inventory, but never quote through fair value.
         net_position = self.position.option_quantity_by_option_id.get(option.option_id, 0)
         skew_limit = max(half_spread - 0.005, 0.0)
-        skew = min(max(-0.002 * net_position, -skew_limit), skew_limit)
+        skew = min(max(-self.SKEW_COEF * net_position, -skew_limit), skew_limit)
         center = min(max(fair + skew, 0.005), 0.995)
 
         bid = math.floor((center - half_spread) * 100 + 1e-9) / 100.0

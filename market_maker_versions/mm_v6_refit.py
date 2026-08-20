@@ -1,9 +1,14 @@
-"""Market maker evolution 5 -- "tuned" (v2 chassis + volume-neutral upgrades).
+"""Market maker evolution 6 -- "refit" (v2 + online learning + scaled sizes).
 
-Keeps v2's live-grader-winning posture (flat competitive spread, meaningful
-size, permissive FOK edge) and adds only upgrades that never cost volume:
-daily online re-estimation, inventory skew bounded inside the spread,
-bankroll-scaled sizing, and a per-order FOK risk cap.
+Live grader scores (v2 16.2 > v5 15.4 > v4 14.7) plus feature ablation showed
+the inventory skew was the costly piece of v5: it trades margin for variance
+reduction the grader's flow doesn't charge for. v6 is v2's exact posture --
+flat 3-cent spread, centered quotes (no skew), FOK edge 1 cent capped only by
+the whole bankroll -- plus the two upgrades the ablation shows are free or
+better: daily online re-estimation and bankroll-scaled quote sizes.
+
+Dials, if further grader runs suggest tuning: SIZE_FRACTION=0.0 reverts to
+v2's fixed size 25; SKEW_COEF>0 re-enables spread-bounded inventory skew.
 """
 
 import math
@@ -545,7 +550,7 @@ def _estimate_market_parameters(market_history: MarketHistory) -> MarketParamete
 
 
 # ============================================================================
-# YOUR MARKET MAKER -- v5 "tuned" (v2 chassis + volume-neutral upgrades)
+# YOUR MARKET MAKER -- v6 "refit" (v2 chassis + online learning + scaled sizes)
 #
 # Live grader results showed v2's permissive posture (flat competitive
 # spread, fixed meaningful size, 1-cent FOK edge, no position caps) earning
@@ -572,8 +577,8 @@ class MarketMaker:
     QUOTE_SIZE_MAX: Final[int] = 80
     SIZE_FRACTION: Final[float] = 0.30
     FOK_EDGE: Final[float] = 0.01
-    FOK_RISK_FRACTION: Final[float] = 0.50
-    SKEW_COEF: Final[float] = 0.002
+    FOK_RISK_FRACTION: Final[float] = 1.0
+    SKEW_COEF: Final[float] = 0.0
     MAX_HISTORY: Final[int] = 1500
 
     def __init__(
@@ -681,7 +686,7 @@ class MarketMaker:
 
     @property
     def name(self) -> str:
-        return "AtlasMM-v5"
+        return "AtlasMM-v6"
 
     def price_option(self, option: BinaryOption) -> float:
         params = self._estimated_parameters

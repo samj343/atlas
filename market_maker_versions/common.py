@@ -10,6 +10,7 @@ FILES = {
     "v3": VERSIONS_DIR / "mm_v3_risk_managed.py",
     "v4": VERSIONS_DIR / "mm_v4_adaptive.py",
     "v5": VERSIONS_DIR / "mm_v5_tuned.py",
+    "v6": VERSIONS_DIR / "mm_v6_refit.py",
 }
 
 
