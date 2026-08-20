@@ -12,6 +12,7 @@ FILES = {
     "v5": VERSIONS_DIR / "mm_v5_tuned.py",
     "v6": VERSIONS_DIR / "mm_v6_refit.py",
     "v7": VERSIONS_DIR / "mm_v7_v2refit.py",
+    "v8": VERSIONS_DIR / "mm_v8_additive_refit.py",
 }
 
 

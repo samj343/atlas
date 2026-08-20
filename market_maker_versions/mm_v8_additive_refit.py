@@ -1,13 +1,13 @@
-"""Binary-option market maker (final).
+"""Market maker evolution 8 -- v7 with the refit made strictly additive.
 
-Exact model pricing (rate-chain dynamic program, closed-form lognormal tails,
-sector-correlated spreads). Trading posture is exactly the live-grader
-champion (v2): flat 3-cent spread, centered quotes, fixed size 25 capped by
-the whole bankroll, 1-cent FOK edge. Parameters are estimated from the FULL
-warm-up history and re-fit daily during the session; the online re-fit is
-strictly additive (never trims warm-up data, disables itself if the session
-does not continue the history). Grader-faithful max-loss cash mirror makes
-bankruptcy impossible by construction.
+v7 (v2 + daily re-estimation) scored 14.4 vs v2's 16.2. Audit found the refit
+was not purely additive: stored history was trimmed to the last 1,500 days
+even at warm-up, so on long grader histories v7 estimated from LESS data than
+v2. v8 fixes that (cap raised to 50,000, warm-up never trimmed below what v2
+uses) and adds a boundary guard: if the session's starting values do not
+continue the warm-up history's last day, online appending is disabled rather
+than stitching a fake transition. Everything else is v2's exact posture,
+verified decision-identical with the re-fit pinned.
 """
 
 import math
@@ -686,7 +686,7 @@ class MarketMaker:
 
     @property
     def name(self) -> str:
-        return "AtlasMM"
+        return "AtlasMM-v8"
 
     def price_option(self, option: BinaryOption) -> float:
         params = self._estimated_parameters
