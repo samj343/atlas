@@ -1,11 +1,12 @@
-"""Binary-option market maker (final).
+"""Market maker evolution 7 -- "v2 + refit only".
 
-Exact model pricing (rate-chain dynamic program, closed-form lognormal tails,
-sector-correlated spreads) with parameters estimated from warm-up history and
-re-fit online every day. Trading posture is exactly the live-grader champion
-(v2): flat 3-cent spread, centered quotes, fixed size 25 capped by the whole
-bankroll, 1-cent FOK edge, and a grader-faithful max-loss cash mirror so
-bankruptcy is impossible by construction.
+Live grader scores: v2 16.2, v5 15.4, v4 14.7, v6 14.6. Solving across those
+runs isolates the bankroll-scaled sizing as the harmful piece (v5 and v6 both
+carried it; v6 without skew/FOK-cap mitigation scored worst). v7 is therefore
+the strictest single-variable step from the champion: v2's exact posture and
+sizing -- flat 3-cent spread, centered quotes, fixed size 25 capped by the
+whole bankroll, 1-cent FOK edge -- plus ONLY daily online re-estimation,
+which sharpens the quote center without changing any trade v2 would make.
 """
 
 import math
@@ -683,7 +684,7 @@ class MarketMaker:
 
     @property
     def name(self) -> str:
-        return "AtlasMM"
+        return "AtlasMM-v7"
 
     def price_option(self, option: BinaryOption) -> float:
         params = self._estimated_parameters
