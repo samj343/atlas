@@ -47,7 +47,8 @@ def random_true_params(rng):
 
 
 class Sim:
-    def __init__(self, seed, days=50, cash0=300.0, warmup_days=350, informed_share=0.25):
+    def __init__(self, seed, days=50, cash0=300.0, warmup_days=350, informed_share=0.25, tags=None):
+        self.tags = list(MODS) if tags is None else tags
         self.rng = random.Random(seed)
         self.days = days
         self.cash0 = cash0
@@ -68,8 +69,8 @@ class Sim:
         self.grader_cash = {}
         self.positions = {}  # tag -> {option_id: qty}
         self.bankrupt = {}
-        for tag, mod in MODS.items():
-            mm = mod.MarketMaker(underlyings(self.values), [], cash0)
+        for tag in self.tags:
+            mm = MODS[tag].MarketMaker(underlyings(self.values), [], cash0)
             mm.warm_up(self.history)
             self.mms[tag] = mm
             self.grader_cash[tag] = cash0

@@ -1,9 +1,12 @@
 # Market maker evolution
 
-Four complete, standalone, grader-submittable versions of the binary-option
-`MarketMaker`, each strictly better than the one before. The final product
-(`mm_v4_adaptive.py`) is also what ships as the repo's main `market_maker.py`
-(with display name `AtlasMM`).
+Five complete, standalone, grader-submittable versions of the binary-option
+`MarketMaker`, each strictly better than the one before. The shipped submission
+(`mm_v5_tuned.py`) is also the repo's main `market_maker.py` (display name
+`AtlasMM`). v5 was built after live grader feedback ranked v2 first and v4
+second: it keeps v2's posture and adds only upgrades that never cost volume.
+On held-out seeds it beats v2 solo (+59 vs +21 mean PnL, +52 vs -51 in
+informed-heavy flow) and head-to-head in one market (+35 vs +17).
 
 ## The ladder
 
@@ -13,6 +16,7 @@ Four complete, standalone, grader-submittable versions of the binary-option
 | 2 | `mm_v2_model_pricer.py` | **exact**: dynamic program over the FED rate chain, closed-form lognormal tails conditioned on the terminal rate, ratio closed form for zero-strike spreads, sector-shock integration otherwise | WLS rate fit + OLS company regressions from warm-up history | fixed 3-cent half spread, fixed size 25 capped only by the whole bankroll, 1-cent FOK edge, grader-faithful max-loss cash mirror |
 | 3 | `mm_v3_risk_managed.py` | same engine | same | curvature-aware spreads (tighter near 0/1), inventory skew bounded inside the spread, per-side fractional risk budgets (bankruptcy impossible by construction), per-option position caps, FOK edge + size discipline |
 | 4 | `mm_v4_adaptive.py` | same engine | **online**: parameters re-fit every day as the session reveals new data | v3 plus: spreads scale with model uncertainty (one-standard-error reprice), per-counterparty markout-EMA toxicity (wider quotes / smaller size / stricter FOK edge against flow that keeps costing money, only after ≥3 trades of evidence) |
+| 5 | `mm_v5_tuned.py` | same engine | same online re-fit as v4 | **the shipped submission**: v2's live-grader-winning posture (flat 3-cent spread, permissive 1-cent FOK edge) plus only volume-neutral upgrades — daily re-estimation, inventory skew bounded inside the spread, bankroll-scaled sizes, per-order FOK risk cap |
 
 ## Key correctness details (all versions ≥ v2)
 

@@ -1,11 +1,9 @@
-"""Binary-option market maker (final).
+"""Market maker evolution 5 -- "tuned" (v2 chassis + volume-neutral upgrades).
 
-Exact model pricing (rate-chain dynamic program, closed-form lognormal tails,
-sector-correlated spreads) with parameters estimated from warm-up history and
-re-fit online every day. Quoting keeps the live-grader-proven posture: a flat
-competitive spread with inventory skew bounded inside it, bankroll-scaled
-sizes, a permissive but risk-capped FOK policy, and a grader-faithful
-max-loss cash mirror so bankruptcy is impossible by construction.
+Keeps v2's live-grader-winning posture (flat competitive spread, meaningful
+size, permissive FOK edge) and adds only upgrades that never cost volume:
+daily online re-estimation, inventory skew bounded inside the spread,
+bankroll-scaled sizing, and a per-order FOK risk cap.
 """
 
 import math
@@ -547,9 +545,9 @@ def _estimate_market_parameters(market_history: MarketHistory) -> MarketParamete
 
 
 # ============================================================================
-# YOUR MARKET MAKER
+# YOUR MARKET MAKER -- v5 "tuned" (v2 chassis + volume-neutral upgrades)
 #
-# Design notes: live grader results showed v2's permissive posture (flat competitive
+# Live grader results showed v2's permissive posture (flat competitive
 # spread, fixed meaningful size, 1-cent FOK edge, no position caps) earning
 # the most, with v4's adaptivity second. v5 keeps v2's posture and adds only
 # the upgrades that never cost volume:
@@ -682,7 +680,7 @@ class MarketMaker:
 
     @property
     def name(self) -> str:
-        return "AtlasMM"
+        return "AtlasMM-v5"
 
     def price_option(self, option: BinaryOption) -> float:
         params = self._estimated_parameters
